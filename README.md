@@ -33,9 +33,9 @@ colab-notebooks_Classification/
 
 ## Supervisors
 ### Company Supervisor
-- **Name:** Mr. Vishwa Mahanama  
-- **Organization:** Adeona Technologies  
-- **Responsibilities:**  
+- Name: Mr. Vishwa Mahanama  
+- Organization: Adeona Technologies  
+- Responsibilities: 
   - Evaluate project progress  
   - Review major updates  
   - Approve deployments  
