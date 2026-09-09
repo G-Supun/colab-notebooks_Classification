@@ -16,19 +16,16 @@ colab-notebooks_Classification/
 │
 ├── classifierPipline.ipynb
 │
-├── mcp/
-│   └── server.py
+├── model/
+│   ├── student_cnn.pt
+│   ├── tokenizer.json
+│   └── tokenizer_config.json
 │
 ├── src/
 │   └── classifier.py
 │
-├── model/
-│   └── best_model/
-│       ├── student_cnn.pt
-│       ├── tokenizer.json
-│       ├── tokenizer_config.json
-│       ├── vocab.txt
-│       └── special_tokens_map.json
+├── mcp/
+│   └── server.py
 │
 ├── requirements.txt
 ├── README.md
