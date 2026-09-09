@@ -3,12 +3,8 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import DistilBertTokenizerFast
+from tokenizers import Tokenizer
 
-
-# ============================================================
-# Configuration
-# ============================================================
 
 MAX_LEN = 64
 
@@ -17,11 +13,6 @@ LABEL_MAP = {
     1: "transactional",
 }
 
-
-# ============================================================
-# Student CNN
-# This architecture must match the training notebook exactly.
-# ============================================================
 
 class SMSSequenceCNN(nn.Module):
     def __init__(
@@ -42,19 +33,21 @@ class SMSSequenceCNN(nn.Module):
 
         self.convs = nn.ModuleList([
             nn.Conv1d(
-                in_channels=embed_dim,
-                out_channels=num_filters,
+                embed_dim,
+                num_filters,
                 kernel_size=k,
             )
             for k in filter_sizes
         ])
 
-        total_conv_out = num_filters * len(filter_sizes)
+        total_features = (
+            num_filters * len(filter_sizes)
+        )
 
         self.dropout = nn.Dropout(dropout_rate)
 
         self.fc1 = nn.Linear(
-            total_conv_out,
+            total_features,
             64,
         )
 
@@ -64,15 +57,15 @@ class SMSSequenceCNN(nn.Module):
         )
 
     def forward(self, input_ids):
-        # [batch, sequence]
+
         x = self.embedding(input_ids)
 
-        # [batch, embedding_dim, sequence]
         x = x.permute(0, 2, 1)
 
-        conv_outputs = []
+        pooled_outputs = []
 
         for conv in self.convs:
+
             x_conv = F.relu(conv(x))
 
             pooled = F.adaptive_max_pool1d(
@@ -80,10 +73,10 @@ class SMSSequenceCNN(nn.Module):
                 1,
             ).squeeze(-1)
 
-            conv_outputs.append(pooled)
+            pooled_outputs.append(pooled)
 
         features = torch.cat(
-            conv_outputs,
+            pooled_outputs,
             dim=1,
         )
 
@@ -98,13 +91,9 @@ class SMSSequenceCNN(nn.Module):
         return logits
 
 
-# ============================================================
-# SMS Classifier
-# ============================================================
-
 class SMSClassifier:
 
-    def __init__(self, model_dir: str):
+    def __init__(self, model_dir):
 
         self.model_dir = Path(model_dir)
 
@@ -114,33 +103,27 @@ class SMSClassifier:
             else "cpu"
         )
 
-        # ----------------------------------------------------
-        # Load tokenizer
-        # ----------------------------------------------------
-
-        self.tokenizer = DistilBertTokenizerFast.from_pretrained(
-            self.model_dir,
-            local_files_only=True,
+        # Load tokenizer.json directly
+        tokenizer_path = (
+            self.model_dir / "tokenizer.json"
         )
 
-        # ----------------------------------------------------
+        self.tokenizer = Tokenizer.from_file(
+            str(tokenizer_path)
+        )
+
         # Create model
-        # ----------------------------------------------------
-
         self.model = SMSSequenceCNN(
-            vocab_size=self.tokenizer.vocab_size
+            vocab_size=self.tokenizer.get_vocab_size()
         )
 
-        # ----------------------------------------------------
-        # Load trained weights
-        # ----------------------------------------------------
-
-        checkpoint_path = (
+        # Load student CNN
+        model_path = (
             self.model_dir / "student_cnn.pt"
         )
 
         state_dict = torch.load(
-            checkpoint_path,
+            model_path,
             map_location=self.device,
         )
 
@@ -149,12 +132,7 @@ class SMSClassifier:
         )
 
         self.model.to(self.device)
-
         self.model.eval()
-
-    # ========================================================
-    # Classify one SMS
-    # ========================================================
 
     def classify(self, message: str):
 
@@ -170,16 +148,23 @@ class SMSClassifier:
                 "message cannot be empty"
             )
 
-        encoding = self.tokenizer(
-            message,
-            max_length=MAX_LEN,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
+        # Tokenize
+        encoded = self.tokenizer.encode(
+            message
         )
 
-        input_ids = encoding["input_ids"].to(
-            self.device
+        input_ids = encoded.ids[:MAX_LEN]
+
+        # Padding
+        if len(input_ids) < MAX_LEN:
+            input_ids += [
+                0
+            ] * (MAX_LEN - len(input_ids))
+
+        input_ids = torch.tensor(
+            [input_ids],
+            dtype=torch.long,
+            device=self.device,
         )
 
         with torch.no_grad():
@@ -193,8 +178,11 @@ class SMSClassifier:
             ).item()
 
         if probability >= 0.5:
+
             label_id = 1
+
         else:
+
             label_id = 0
 
         category = LABEL_MAP[label_id]
@@ -208,38 +196,25 @@ class SMSClassifier:
         return {
             "category": category,
             "confidence": round(
-                float(confidence),
+                confidence,
                 6,
             ),
             "transactional_probability": round(
-                float(probability),
+                probability,
                 6,
             ),
             "promotional_probability": round(
-                float(1.0 - probability),
+                1.0 - probability,
                 6,
             ),
         }
 
-    # ========================================================
-    # Classify multiple SMS messages
-    # ========================================================
-
     def classify_batch(self, messages):
-
-        if not isinstance(messages, list):
-            raise TypeError(
-                "messages must be a list"
-            )
 
         return [
             self.classify(message)
             for message in messages
         ]
-
-    # ========================================================
-    # Model information
-    # ========================================================
 
     def model_info(self):
 
@@ -250,7 +225,6 @@ class SMSClassifier:
 
         return {
             "model": "SMSSequenceCNN",
-            "model_type": "1D-CNN student model",
             "parameters": parameter_count,
             "max_sequence_length": MAX_LEN,
             "labels": LABEL_MAP,
